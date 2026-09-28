@@ -432,9 +432,9 @@ export interface SortSpec {
  * Built query parameters from QueryBuilder
  */
 export interface BuiltQuery {
-  /** Query parameters for GET request */
+  /** Search request parameters */
   params: SearchRequestParams;
 
-  /** Whether this query requires POST (has aggregations) */
+  /** @deprecated Ignored: searches are always sent as POST. */
   requiresPost: boolean;
 }

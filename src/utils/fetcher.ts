@@ -3,6 +3,7 @@ import {
   QuickwitError,
   ConnectionError,
   TimeoutError,
+  ValidationError,
   createErrorFromStatus,
   type ErrorDetails,
 } from "../errors";
@@ -36,7 +37,7 @@ export interface FetchOptions {
 export class Fetcher {
   private readonly endpoint: string;
   private readonly defaultHeaders: Record<string, string>;
-  private readonly defaultTimeout: number;
+  readonly defaultTimeout: number;
 
   constructor(config: QuickwitConfig) {
     // Normalize endpoint while preserving any reverse-proxy path prefix.
@@ -62,6 +63,12 @@ export class Fetcher {
    * Build URL with query parameters
    */
   private buildUrl(path: string, params?: FetchOptions["params"]): string {
+    // encodeURIComponent keeps "." and "..", and URL resolution would collapse them into
+    // another route: deleteSource("..") would become the delete-index endpoint.
+    if (path.split("/").some((segment) => segment === "." || segment === "..")) {
+      throw new ValidationError(`Path segment "." or ".." is not allowed: ${path}`);
+    }
+
     const url = new URL(path.replace(/^\/+/, ""), `${this.endpoint}/`);
 
     if (params) {

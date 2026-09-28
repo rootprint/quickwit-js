@@ -17,6 +17,9 @@ import { QueryBuilder } from "./search/query-builder";
 import { toNDJSON } from "./utils/ndjson";
 import { ValidationError } from "./errors";
 
+// Quickwit's default commit_timeout_secs is 60s, and wait_for can block that long.
+const WAIT_FOR_MIN_TIMEOUT_MS = 90_000;
+
 /**
  * Handle for operations on a specific Quickwit index
  */
@@ -82,64 +85,23 @@ export class Index {
   async search<T = Record<string, unknown>>(
     query?: string | SearchRequestParams | QueryBuilder | BuiltQuery
   ): Promise<SearchResponse<T>> {
-    const { params, usePost } = this.normalizeQuery(query);
-    const path = `/api/v1/${encodeURIComponent(this.indexId)}/search`;
-
-    if (usePost) {
-      const body: Record<string, unknown> = { ...params };
-      delete body.search_fields;
-      delete body.snippet_fields;
-      if (params.search_fields !== undefined && params.search_fields.length > 0) {
-        body.search_field = params.search_fields.join(",");
-      }
-      if (params.snippet_fields !== undefined && params.snippet_fields.length > 0) {
-        body.snippet_fields = params.snippet_fields.join(",");
-      }
-      if (params.sort_by !== undefined) {
-        body.sort_by = params.sort_by.join(",");
-      }
-      return this.fetcher.post<SearchResponse<T>>(path, body);
-    }
-
-    // Convert params to query string format for GET
-    const queryParams: Record<string, string | number | boolean | undefined> =
-      {};
-
-    if (params.query !== undefined) {
-      queryParams.query = params.query;
-    }
-    if (params.max_hits !== undefined) {
-      queryParams.max_hits = params.max_hits;
-    }
-    if (params.start_offset !== undefined) {
-      queryParams.start_offset = params.start_offset;
-    }
-    if (params.start_timestamp !== undefined) {
-      queryParams.start_timestamp = params.start_timestamp;
-    }
-    if (params.end_timestamp !== undefined) {
-      queryParams.end_timestamp = params.end_timestamp;
-    }
-    if (params.sort_by !== undefined) {
-      queryParams.sort_by = params.sort_by.join(",");
-    }
-    if (params.count_all !== undefined) {
-      queryParams.count_all = params.count_all;
-    }
-    if (params.allow_failed_splits !== undefined) {
-      queryParams.allow_failed_splits = params.allow_failed_splits;
-    }
-    if (params.format !== undefined) {
-      queryParams.format = params.format;
-    }
+    const params = this.normalizeQuery(query);
+    const body: Record<string, unknown> = { ...params };
+    delete body.search_fields;
+    delete body.snippet_fields;
     if (params.search_fields !== undefined && params.search_fields.length > 0) {
-      queryParams.search_field = params.search_fields.join(",");
+      body.search_field = params.search_fields.join(",");
     }
     if (params.snippet_fields !== undefined && params.snippet_fields.length > 0) {
-      queryParams.snippet_fields = params.snippet_fields.join(",");
+      body.snippet_fields = params.snippet_fields.join(",");
     }
-
-    return this.fetcher.get<SearchResponse<T>>(path, { params: queryParams });
+    if (params.sort_by !== undefined) {
+      body.sort_by = params.sort_by.join(",");
+    }
+    return this.fetcher.post<SearchResponse<T>>(
+      `/api/v1/${encodeURIComponent(this.indexId)}/search`,
+      body
+    );
   }
 
   /**
@@ -164,11 +126,7 @@ export class Index {
   async searchFirst<T = Record<string, unknown>>(
     query?: string | SearchRequestParams | QueryBuilder | BuiltQuery
   ): Promise<T | undefined> {
-    // Ensure we only fetch one result
-    const { params } = this.normalizeQuery(query);
-    params.max_hits = 1;
-
-    const response = await this.search<T>(params);
+    const response = await this.search<T>({ ...this.normalizeQuery(query), max_hits: 1 });
     return response.hits[0];
   }
 
@@ -178,16 +136,14 @@ export class Index {
    * @param query - Query string or parameters (defaults to "*" for all documents)
    * @returns Number of matching documents
    */
-  async count(query?: string | SearchRequestParams | QueryBuilder): Promise<number> {
-    const { params } = this.normalizeQuery(query);
-    params.max_hits = 0;
-    params.count_all = true;
-    // Default to match all if no query provided
-    if (!params.query) {
-      params.query = "*";
-    }
-
-    const response = await this.search(params);
+  async count(query?: string | SearchRequestParams | QueryBuilder | BuiltQuery): Promise<number> {
+    const params = this.normalizeQuery(query);
+    const response = await this.search({
+      ...params,
+      query: params.query || "*",
+      max_hits: 0,
+      count_all: true,
+    });
     return response.num_hits;
   }
 
@@ -239,7 +195,13 @@ export class Index {
       params.detailed_response = options.detailed_response;
     }
 
-    return this.fetcher.postNDJSON<IngestResponse>(path, ndjsonBody, { params });
+    const waitForTimeout = options?.commit === "wait_for"
+      ? Math.max(this.fetcher.defaultTimeout, WAIT_FOR_MIN_TIMEOUT_MS)
+      : undefined;
+    return this.fetcher.postNDJSON<IngestResponse>(path, ndjsonBody, {
+      params,
+      timeout: options?.timeout ?? waitForTimeout,
+    });
   }
 
   /**
@@ -334,39 +296,20 @@ export class Index {
     );
   }
 
-  /**
-   * Normalize different query input types to params and usePost flag
-   */
   private normalizeQuery(
     query?: string | SearchRequestParams | QueryBuilder | BuiltQuery
-  ): { params: SearchRequestParams; usePost: boolean } {
+  ): SearchRequestParams {
     if (query === undefined) {
-      return { params: { query: "*" }, usePost: false };
+      return { query: "*" };
     }
-
     if (typeof query === "string") {
-      return { params: { query }, usePost: false };
+      return { query };
     }
-
-    if (query instanceof QueryBuilder) {
-      const built = query.build();
-      const params = { ...built.params };
-      params.query ??= "*";
-      return { params, usePost: built.requiresPost };
-    }
-
-    // Check if it's a BuiltQuery
-    if ("params" in query && "requiresPost" in query) {
-      const params = { ...query.params };
-      params.query ??= "*";
-      const hasAggs = params.aggs !== undefined && Object.keys(params.aggs).length > 0;
-      return { params, usePost: query.requiresPost || hasAggs };
-    }
-
-    // It's a SearchRequestParams
-    const hasAggs = query.aggs !== undefined && Object.keys(query.aggs).length > 0;
-    const params = { ...query };
-    params.query ??= "*";
-    return { params, usePost: hasAggs };
+    const params = query instanceof QueryBuilder
+      ? query.build().params
+      : "params" in query
+      ? query.params
+      : query;
+    return { ...params, query: params.query ?? "*" };
   }
 }

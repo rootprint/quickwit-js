@@ -62,9 +62,6 @@ export class QuickwitError extends Error {
     if (Error.captureStackTrace) {
       Error.captureStackTrace(this, QuickwitError);
     }
-
-    // Ensure prototype chain is correct
-    Object.setPrototypeOf(this, QuickwitError.prototype);
   }
 
   /**
@@ -88,7 +85,6 @@ export class ConnectionError extends QuickwitError {
   constructor(message: string, cause?: Error) {
     super(message, QuickwitErrorCode.CONNECTION_ERROR, { cause });
     this.name = "ConnectionError";
-    Object.setPrototypeOf(this, ConnectionError.prototype);
   }
 }
 
@@ -109,7 +105,6 @@ export class TimeoutError extends QuickwitError {
     super(message, QuickwitErrorCode.TIMEOUT, { cause, status, details });
     this.name = "TimeoutError";
     this.timeout = timeout;
-    Object.setPrototypeOf(this, TimeoutError.prototype);
   }
 }
 
@@ -133,7 +128,6 @@ export class ValidationError extends QuickwitError {
     });
     this.name = "ValidationError";
     this.fields = options?.fields;
-    Object.setPrototypeOf(this, ValidationError.prototype);
   }
 }
 
@@ -162,7 +156,6 @@ export class NotFoundError extends QuickwitError {
     this.name = "NotFoundError";
     this.resourceType = options?.resourceType;
     this.resourceId = options?.resourceId;
-    Object.setPrototypeOf(this, NotFoundError.prototype);
   }
 }
 
@@ -173,7 +166,6 @@ export class UnauthorizedError extends QuickwitError {
   constructor(message: string = "Unauthorized", details?: ErrorDetails) {
     super(message, QuickwitErrorCode.UNAUTHORIZED, { status: 401, details });
     this.name = "UnauthorizedError";
-    Object.setPrototypeOf(this, UnauthorizedError.prototype);
   }
 }
 
@@ -184,7 +176,6 @@ export class ForbiddenError extends QuickwitError {
   constructor(message: string = "Forbidden", details?: ErrorDetails) {
     super(message, QuickwitErrorCode.FORBIDDEN, { status: 403, details });
     this.name = "ForbiddenError";
-    Object.setPrototypeOf(this, ForbiddenError.prototype);
   }
 }
 

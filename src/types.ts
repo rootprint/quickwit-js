@@ -506,6 +506,12 @@ export interface IngestOptions {
 
   /** Include individual parse failures in the response (ingest v2 only). */
   detailed_response?: boolean;
+
+  /**
+   * Request timeout in ms. Defaults to the client timeout, raised to at least 90s for
+   * `commit: "wait_for"`. Set it explicitly for indexes with `commit_timeout_secs` above 60.
+   */
+  timeout?: number;
 }
 
 /**

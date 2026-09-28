@@ -1,5 +1,6 @@
-import { test, expect, describe } from "bun:test";
+import { test, expect, describe, afterEach } from "bun:test";
 import {
+  QuickwitClient,
   QueryBuilder,
   AggregationBuilder,
   QuickwitError,
@@ -752,5 +753,155 @@ describe("isFastFieldEnabled", () => {
 
   test("normalizer lowercase → true", () => {
     expect(isFastFieldEnabled(mk({ normalizer: "lowercase" }))).toBe(true);
+  });
+});
+
+// ============================================================================
+// HTTP Request Tests (stubbed fetch)
+// ============================================================================
+
+describe("HTTP requests", () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  const emptySearch = { num_hits: 7, hits: [], elapsed_time_micros: 1, errors: [] };
+
+  function stubFetch(body: unknown = emptySearch, delayMs = 0) {
+    const calls: { url: string; method: string; body: unknown }[] = [];
+    globalThis.fetch = ((url: string, init: RequestInit) => {
+      calls.push({
+        url: String(url),
+        method: init.method ?? "GET",
+        body: typeof init.body === "string" && init.body.startsWith("{") ? JSON.parse(init.body) : init.body,
+      });
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(
+          () => resolve(new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } })),
+          delayMs
+        );
+        init.signal?.addEventListener("abort", () => {
+          clearTimeout(timer);
+          reject(new DOMException("aborted", "AbortError"));
+        });
+      });
+    }) as unknown as typeof fetch;
+    return calls;
+  }
+
+  const client = (timeout?: number) => new QuickwitClient({ endpoint: "http://qw.test", timeout });
+
+  describe("dot-segment IDs", () => {
+    const cases: [string, (c: QuickwitClient) => Promise<unknown>][] = [
+      ["deleteSource('..')", (c) => c.index("logs").deleteSource("..")],
+      ["deleteSource('.')", (c) => c.index("logs").deleteSource(".")],
+      ["updateSource('..')", (c) => c.index("logs").updateSource("..", { source_id: "x", source_type: "file" } as never)],
+      ["index('..').search()", (c) => c.index("..").search()],
+      ["traces().listOperations('..')", (c) => c.traces().listOperations("..")],
+    ];
+
+    for (const [name, call] of cases) {
+      test(`${name} is rejected before any request`, async () => {
+        const calls = stubFetch();
+        await expect(call(client())).rejects.toBeInstanceOf(ValidationError);
+        expect(calls).toHaveLength(0);
+      });
+    }
+
+    test("IDs that merely contain dots are allowed", async () => {
+      const calls = stubFetch();
+      await client().index("logs.v1").deleteSource("src..2");
+      expect(calls[0]?.url).toBe("http://qw.test/api/v1/indexes/logs.v1/sources/src..2");
+    });
+  });
+
+  describe("search always uses POST", () => {
+    test("string query", async () => {
+      const calls = stubFetch();
+      await client().index("logs").search("level:error");
+      expect(calls[0]).toEqual({
+        url: "http://qw.test/api/v1/logs/search",
+        method: "POST",
+        body: { query: "level:error" },
+      });
+    });
+
+    test("params object joins list fields into strings", async () => {
+      const calls = stubFetch();
+      await client().index("logs").search({
+        query: "x",
+        search_fields: ["a", "b"],
+        snippet_fields: ["a"],
+        sort_by: ["-ts", "_score"],
+        count_all: true,
+      });
+      expect(calls[0]?.method).toBe("POST");
+      expect(calls[0]?.body).toEqual({
+        query: "x",
+        search_field: "a,b",
+        snippet_fields: "a",
+        sort_by: "-ts,_score",
+        count_all: true,
+      });
+    });
+
+    test("searchFirst() with a BuiltQuery", async () => {
+      const calls = stubFetch();
+      await client().index("logs").searchFirst(new QueryBuilder("x").limit(50).build());
+      expect(calls[0]?.method).toBe("POST");
+      expect(calls[0]?.body).toEqual({ query: "x", max_hits: 1 });
+    });
+
+    test("count() with a BuiltQuery", async () => {
+      const calls = stubFetch();
+      const n = await client().index("logs").count(new QueryBuilder("x").build());
+      expect(n).toBe(7);
+      expect(calls[0]?.method).toBe("POST");
+      expect(calls[0]?.body).toEqual({ query: "x", max_hits: 0, count_all: true });
+    });
+  });
+
+  describe("ingest timeout", () => {
+    const docs = [{ msg: "hi" }];
+    const ingestOk = { num_docs_for_processing: 1 };
+
+    test("wait_for outlasts a short client timeout", async () => {
+      stubFetch(ingestOk, 50);
+      const res = await client(10).index("logs").ingest(docs, { commit: "wait_for" });
+      expect(res.num_docs_for_processing).toBe(1);
+    });
+
+    test("auto commit keeps the client timeout", async () => {
+      stubFetch(ingestOk, 50);
+      await expect(client(10).index("logs").ingest(docs)).rejects.toBeInstanceOf(TimeoutError);
+    });
+
+    test("explicit per-call timeout wins over the wait_for minimum", async () => {
+      stubFetch(ingestOk, 50);
+      await expect(
+        client().index("logs").ingest(docs, { commit: "wait_for", timeout: 10 })
+      ).rejects.toBeInstanceOf(TimeoutError);
+    });
+
+    test("per-call timeout is not sent as a query param", async () => {
+      const calls = stubFetch(ingestOk);
+      await client().index("logs").ingest(docs, { commit: "wait_for", timeout: 1000 });
+      expect(calls[0]?.url).toBe("http://qw.test/api/v1/logs/ingest?commit=wait_for");
+    });
+  });
+});
+
+describe("QuickwitError subclassing", () => {
+  test("user subclasses keep their own prototype", () => {
+    class RetryableError extends QuickwitError {
+      retry() {
+        return "again";
+      }
+    }
+    const err = new RetryableError("boom");
+    expect(err).toBeInstanceOf(RetryableError);
+    expect(err).toBeInstanceOf(QuickwitError);
+    expect(err.retry()).toBe("again");
   });
 });

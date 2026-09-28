@@ -113,7 +113,7 @@ console.log({
 
 Quickwit ingest v2 returns HTTP 200 for partially accepted batches. Check `num_rejected_docs` even when the request succeeds. `parse_failures` is present only when `detailed_response` is enabled. Legacy ingest v1 returns only `num_docs_for_processing` and does not support detailed responses.
 
-Commit modes are `auto`, `wait_for`, and `force`.
+Commit modes are `auto`, `wait_for`, and `force`. `wait_for` blocks until the next commit (Quickwit's default `commit_timeout_secs` is 60), so its request timeout is raised to at least 90s. Pass `timeout` in the ingest options for indexes with a longer commit timeout. A timed-out `wait_for` ingest may still commit, so retrying it can duplicate documents.
 
 ## Indexes
 
