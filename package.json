@@ -13,9 +13,7 @@
   },
   "homepage": "https://github.com/rootprint/quickwit-js",
   "type": "module",
-  "sideEffects": [
-    "./src/**"
-  ],
+  "sideEffects": false,
   "engines": {
     "node": ">=18"
   },
