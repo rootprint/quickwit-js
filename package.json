@@ -13,7 +13,9 @@
   },
   "homepage": "https://github.com/rootprint/quickwit-js",
   "type": "module",
-  "sideEffects": false,
+  "sideEffects": [
+    "./src/**"
+  ],
   "engines": {
     "node": ">=18"
   },
@@ -55,7 +57,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "bun test tests/unit.test.ts",
     "test:integration": "bun test --timeout 30000 tests/integration.test.ts",
-    "prepublishOnly": "bun run typecheck && bun run build && bun test tests/unit.test.ts"
+    "prepublishOnly": "bun run typecheck && bun run build && bun test tests/unit.test.ts && node -e \"import('./dist/index.js').then(m => { if (!m.QuickwitClient) throw new Error('dist/index.js exports nothing') })\" && node -e \"if (!require('./dist/index.cjs').QuickwitClient) throw new Error('dist/index.cjs exports nothing')\""
   },
   "devDependencies": {
     "@types/bun": "^1.3.14",
