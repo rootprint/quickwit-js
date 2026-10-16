@@ -27,6 +27,9 @@ export interface FetchOptions {
   /** Override timeout for this request */
   timeout?: number;
 
+  /** Caller's abort signal, combined with the timeout */
+  signal?: AbortSignal;
+
   /** Query parameters */
   params?: Record<string, string | number | boolean | undefined>;
 }
@@ -106,15 +109,13 @@ export class Fetcher {
    * Perform a fetch request with error handling
    */
   async fetch<T>(path: string, options: FetchOptions = {}): Promise<T> {
-    const { method = "GET", body, rawBody, headers = {}, timeout, params } = options;
+    const { method = "GET", body, rawBody, headers = {}, timeout, params, signal } = options;
     const requestTimeout = timeout ?? this.defaultTimeout;
+    const timeoutSignal = AbortSignal.timeout(requestTimeout);
     let url = this.endpoint;
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
     try {
       url = this.buildUrl(path, params);
-      const controller = new AbortController();
-      timeoutId = setTimeout(() => controller.abort(), requestTimeout);
 
       const requestBody = rawBody instanceof Uint8Array
         ? Uint8Array.from(rawBody).buffer
@@ -133,7 +134,7 @@ export class Fetcher {
         method,
         headers: requestHeaders,
         body: requestBody,
-        signal: controller.signal,
+        signal: signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal,
       });
 
       // Handle non-OK responses
@@ -157,17 +158,20 @@ export class Fetcher {
       }
       return responseText as T;
     } catch (error) {
-      // Handle abort (timeout)
-      if (error instanceof Error && error.name === "AbortError") {
+      if (error instanceof QuickwitError) {
+        throw error;
+      }
+
+      // Like fetch, a caller's abort surfaces as its own reason, not as a QuickwitError.
+      if (signal?.aborted) {
+        throw signal.reason;
+      }
+
+      if (timeoutSignal.aborted) {
         throw new TimeoutError(
           `Request to ${url} timed out after ${requestTimeout}ms`,
           requestTimeout
         );
-      }
-
-      // Re-throw QuickwitError instances
-      if (error instanceof QuickwitError) {
-        throw error;
       }
 
       // Handle network errors
@@ -184,10 +188,6 @@ export class Fetcher {
         undefined,
         { cause: error instanceof Error ? error : undefined }
       );
-    } finally {
-      if (timeoutId !== undefined) {
-        clearTimeout(timeoutId);
-      }
     }
   }
 

@@ -777,13 +777,14 @@ describe("HTTP requests", () => {
         body: typeof init.body === "string" && init.body.startsWith("{") ? JSON.parse(init.body) : init.body,
       });
       return new Promise((resolve, reject) => {
+        if (init.signal?.aborted) return reject(init.signal.reason);
         const timer = setTimeout(
           () => resolve(new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } })),
           delayMs
         );
         init.signal?.addEventListener("abort", () => {
           clearTimeout(timer);
-          reject(new DOMException("aborted", "AbortError"));
+          reject(init.signal?.reason);
         });
       });
     }) as unknown as typeof fetch;
@@ -888,6 +889,50 @@ describe("HTTP requests", () => {
       const calls = stubFetch(ingestOk);
       await client().index("logs").ingest(docs, { commit: "wait_for", timeout: 1000 });
       expect(calls[0]?.url).toBe("http://qw.test/api/v1/logs/ingest?commit=wait_for");
+    });
+  });
+
+  describe("caller signal", () => {
+    const cases: [string, (c: QuickwitClient, o: { signal: AbortSignal }) => Promise<unknown>][] = [
+      ["search", (c, o) => c.index("logs").search("x", o)],
+      ["searchHits", (c, o) => c.index("logs").searchHits("x", o)],
+      ["searchFirst", (c, o) => c.index("logs").searchFirst("x", o)],
+      ["count", (c, o) => c.index("logs").count("x", o)],
+      ["traces().listServices", (c, o) => c.traces().listServices(o)],
+      ["traces().listOperations", (c, o) => c.traces().listOperations("svc", o)],
+      ["traces().search", (c, o) => c.traces().search({}, o)],
+      ["traces().getTrace", (c, o) => c.traces().getTrace("0123456789abcdef", o)],
+    ];
+
+    for (const [name, call] of cases) {
+      test(`${name} forwards the signal`, async () => {
+        stubFetch(emptySearch, 50);
+        const reason = new Error("client gone");
+        await expect(call(client(), { signal: AbortSignal.abort(reason) })).rejects.toBe(reason);
+      });
+    }
+
+    test("aborting mid-request rejects with the caller's reason, not TimeoutError", async () => {
+      stubFetch(emptySearch, 50);
+      const controller = new AbortController();
+      const reason = new Error("client gone");
+      const pending = client().index("logs").search("x", { signal: controller.signal });
+      controller.abort(reason);
+      await expect(pending).rejects.toBe(reason);
+    });
+
+    test("the client's own errors win over an aborted signal", async () => {
+      stubFetch();
+      await expect(
+        client().index("..").search("x", { signal: AbortSignal.abort(new Error("client gone")) })
+      ).rejects.toBeInstanceOf(ValidationError);
+    });
+
+    test("timeout still throws TimeoutError when a signal is passed", async () => {
+      stubFetch(emptySearch, 50);
+      await expect(
+        client(10).index("logs").search("x", { signal: new AbortController().signal })
+      ).rejects.toBeInstanceOf(TimeoutError);
     });
   });
 });

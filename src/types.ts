@@ -25,6 +25,9 @@ export interface RequestOptions {
 
   /** Headers to merge with the client defaults. */
   headers?: Record<string, string>;
+
+  /** Aborts the request; the call rejects with `signal.reason`. */
+  signal?: AbortSignal;
 }
 
 /**

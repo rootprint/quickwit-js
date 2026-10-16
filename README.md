@@ -5,7 +5,7 @@
 
 A TypeScript client for [Quickwit](https://quickwit.io) 0.9 with no runtime dependencies. It covers search, ingest, index management, and tracing.
 
-Requires Quickwit 0.9.x and Node.js 18+ or Bun.
+Requires Quickwit 0.9.x and Node.js 20.3+ or Bun.
 
 For a log explorer, trace views, and team access control with API keys and SSO on top of Quickwit, see [Rootprint](https://github.com/rootprint/rootprint), the self-hosted platform this client was built for.
 
@@ -70,7 +70,9 @@ const live = await client.isLive();
 const version = await client.getVersion({ timeout: 5_000 });
 ```
 
-`isHealthy()` and `isLive()` return `false` on any failure, including an unreachable server, and never throw. Call `getVersion()` when you need the error. The health methods, `getVersion()`, and `getCluster()` accept per-call `{ timeout, headers }`, and `ingest()` accepts a per-call `timeout`. The other methods use the client defaults.
+`isHealthy()` and `isLive()` return `false` on any failure, including an unreachable server, and never throw. Call `getVersion()` when you need the error. The health methods, `getVersion()`, `getCluster()`, the search methods (`search()`, `searchHits()`, `searchFirst()`, `count()`), and the trace methods accept per-call `{ timeout, headers, signal }`, and `ingest()` accepts a per-call `timeout`. The other methods use the client defaults.
+
+Pass `signal` to cancel a request when nobody is waiting for its result anymore, for example `logs.search(query, { signal: c.req.raw.signal })` in a server handler. The call then rejects with `signal.reason`, and Quickwit stops the search when the connection closes.
 
 ## Search
 
@@ -272,7 +274,7 @@ console.log(result.partial_success?.rejected_spans ?? 0);
 
 ## Errors
 
-Every error extends `QuickwitError`, which carries a `code`. Errors from a server response also carry the HTTP `status` and the server's `details`.
+Every error extends `QuickwitError`, which carries a `code`. The exception is a request cancelled through `signal`, which rejects with `signal.reason`. Errors from a server response also carry the HTTP `status` and the server's `details`.
 
 ```typescript
 import { NotFoundError, QuickwitError, TimeoutError } from "@rootprint-io/quickwit-js";

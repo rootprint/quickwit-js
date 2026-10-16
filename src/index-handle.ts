@@ -12,6 +12,7 @@ import type {
   UpdateSourceOptions,
   DeleteQueryRequest,
   DeleteTask,
+  RequestOptions,
 } from "./types";
 import { QueryBuilder } from "./search/query-builder";
 import { toNDJSON } from "./utils/ndjson";
@@ -83,7 +84,8 @@ export class Index {
    * ```
    */
   async search<T = Record<string, unknown>>(
-    query?: string | SearchRequestParams | QueryBuilder | BuiltQuery
+    query?: string | SearchRequestParams | QueryBuilder | BuiltQuery,
+    options?: RequestOptions
   ): Promise<SearchResponse<T>> {
     const params = this.normalizeQuery(query);
     const body: Record<string, unknown> = { ...params };
@@ -100,7 +102,8 @@ export class Index {
     }
     return this.fetcher.post<SearchResponse<T>>(
       `/api/v1/${encodeURIComponent(this.indexId)}/search`,
-      body
+      body,
+      options
     );
   }
 
@@ -111,9 +114,10 @@ export class Index {
    * @returns Array of documents
    */
   async searchHits<T = Record<string, unknown>>(
-    query?: string | SearchRequestParams | QueryBuilder | BuiltQuery
+    query?: string | SearchRequestParams | QueryBuilder | BuiltQuery,
+    options?: RequestOptions
   ): Promise<T[]> {
-    const response = await this.search<T>(query);
+    const response = await this.search<T>(query, options);
     return response.hits;
   }
 
@@ -124,9 +128,10 @@ export class Index {
    * @returns First document or undefined if no hits
    */
   async searchFirst<T = Record<string, unknown>>(
-    query?: string | SearchRequestParams | QueryBuilder | BuiltQuery
+    query?: string | SearchRequestParams | QueryBuilder | BuiltQuery,
+    options?: RequestOptions
   ): Promise<T | undefined> {
-    const response = await this.search<T>({ ...this.normalizeQuery(query), max_hits: 1 });
+    const response = await this.search<T>({ ...this.normalizeQuery(query), max_hits: 1 }, options);
     return response.hits[0];
   }
 
@@ -136,14 +141,17 @@ export class Index {
    * @param query - Query string or parameters (defaults to "*" for all documents)
    * @returns Number of matching documents
    */
-  async count(query?: string | SearchRequestParams | QueryBuilder | BuiltQuery): Promise<number> {
+  async count(
+    query?: string | SearchRequestParams | QueryBuilder | BuiltQuery,
+    options?: RequestOptions
+  ): Promise<number> {
     const params = this.normalizeQuery(query);
     const response = await this.search({
       ...params,
       query: params.query || "*",
       max_hits: 0,
       count_all: true,
-    });
+    }, options);
     return response.num_hits;
   }
 

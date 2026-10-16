@@ -1,5 +1,6 @@
 import { ValidationError } from "../errors";
 import type { Fetcher } from "../utils/fetcher";
+import type { RequestOptions } from "../types";
 import type {
   JaegerResponse,
   JaegerTrace,
@@ -17,21 +18,23 @@ export class TraceIndex {
     return this.indexIdPattern;
   }
 
-  async listServices(): Promise<string[]> {
+  async listServices(options?: RequestOptions): Promise<string[]> {
     const response = await this.fetcher.get<JaegerResponse<string[]>>(
-      `${this.basePath}/services`
+      `${this.basePath}/services`,
+      options
     );
     return response.data;
   }
 
-  async listOperations(service: string): Promise<string[]> {
+  async listOperations(service: string, options?: RequestOptions): Promise<string[]> {
     const response = await this.fetcher.get<JaegerResponse<string[]>>(
-      `${this.basePath}/services/${encodeURIComponent(service)}/operations`
+      `${this.basePath}/services/${encodeURIComponent(service)}/operations`,
+      options
     );
     return response.data;
   }
 
-  async search(params: TraceSearchParams = {}): Promise<JaegerTrace[]> {
+  async search(params: TraceSearchParams = {}, options?: RequestOptions): Promise<JaegerTrace[]> {
     if (
       params.limit !== undefined
       && (!Number.isSafeInteger(params.limit) || params.limit < 0 || params.limit > 2_147_483_647)
@@ -52,6 +55,7 @@ export class TraceIndex {
     const response = await this.fetcher.get<JaegerResponse<JaegerTrace[]>>(
       `${this.basePath}/traces`,
       {
+        ...options,
         params: {
           service: params.service,
           operation: params.operation,
@@ -68,14 +72,15 @@ export class TraceIndex {
     return response.data;
   }
 
-  async getTrace(traceId: string): Promise<JaegerTrace | undefined> {
+  async getTrace(traceId: string, options?: RequestOptions): Promise<JaegerTrace | undefined> {
     if (!/^(?:[0-9a-fA-F]{16}|[0-9a-fA-F]{32})$/.test(traceId)) {
       throw new ValidationError("Trace ID must be a 16- or 32-character hexadecimal string", {
         fields: ["traceId"],
       });
     }
     const response = await this.fetcher.get<JaegerResponse<JaegerTrace[]>>(
-      `${this.basePath}/traces/${traceId}`
+      `${this.basePath}/traces/${traceId}`,
+      options
     );
     return response.data[0];
   }
