@@ -1,6 +1,6 @@
 {
   "name": "@rootprint-io/quickwit-js",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "TypeScript client for Quickwit: search, ingest, index management, and tracing APIs",
   "license": "MIT",
   "author": "Oleksandr Zhyhalo",
